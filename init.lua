@@ -1,11 +1,5 @@
 -- ~/.config/nvim/init.lua
--- Neovim config for systems & network programming: Rust, Go, C, Assembly.
--- Requires Neovim >= 0.11 (Ubuntu's apt version is too old, see setup notes).
---
--- Extra setup for assembly LSP (not installed through Mason):
---   Prebuilt: https://github.com/bergercookie/asm-lsp/releases
---             (drop the binary in ~/.cargo/bin)
---   Or build: cargo install asm-lsp   (needs openssl-devel on Fedora)
+-- Neovim configuration.
 
 vim.o.guifont = "JetBrainsMono Nerd Font Mono:h10"
 
