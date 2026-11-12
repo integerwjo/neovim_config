@@ -1,4 +1,4 @@
--- HLA (High Level Assembly) source and include files.
+-- HLA files.
 vim.filetype.add({
 	extension = {
 		hla = "hla",

@@ -17,9 +17,7 @@ vim.g.loaded_python3_provider = 0
 vim.g.loaded_perl_provider = 0
 vim.g.loaded_ruby_provider = 0
 
--- Make user-local binaries visible to Neovim, :make and Mason.
--- ~/.local/bin holds the HLA launcher (hla), arduino-cli, and similar tools;
--- ~/.cargo/bin holds asm-lsp and other cargo installs.
+-- Add user-local tools to PATH.
 do
 	local dirs = vim.split(vim.env.PATH or "", ":", { plain = true })
 	for _, dir in ipairs({ "~/.cargo/bin", "~/.local/bin" }) do
@@ -31,9 +29,7 @@ do
 	vim.env.PATH = table.concat(dirs, ":")
 end
 
--- ============================================================================
 -- Options
--- ============================================================================
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
@@ -44,11 +40,7 @@ o.mouse = "a"
 o.showmode = false -- statusline shows it
 o.clipboard = "unnamedplus"
 
--- Use xsel (X11/XWayland) as the clipboard provider instead of wl-clipboard.
--- On Wayland/GNOME, wl-copy creates a transient surface which makes the
--- terminal/GNOME flicker (neovim#12622, neovim#36975); xsel via XWayland
--- avoids that entirely. Fall back to Neovim's default provider if xsel is
--- missing so yanking never breaks.
+-- Use xsel to avoid wl-copy flicker; fall back if missing.
 if vim.fn.executable("xsel") == 1 then
 	vim.g.clipboard = {
 		name = "xsel",
@@ -81,37 +73,33 @@ o.wrap = false
 o.inccommand = "split"
 o.winborder = "rounded"
 
--- Show tabs/trailing whitespace: essential for asm, Go and Makefiles
+-- Show tabs and trailing whitespace.
 o.list = true
 o.listchars = { tab = "» ", trail = "·", nbsp = "␣" }
 
--- Default indentation (per-language overrides are further down)
+-- Default indentation.
 o.expandtab = true
 o.tabstop = 4
 o.shiftwidth = 4
 o.softtabstop = 4
 o.smartindent = true
 
--- Treesitter-based folding, everything open by default
+-- Treesitter folding.
 o.foldmethod = "expr"
 o.foldexpr = "v:lua.vim.treesitter.foldexpr()"
 o.foldlevelstart = 99
 
--- Netrw file browser: quiet listing.
--- The flicker (neovim#36975) is avoided by using the xsel provider above,
--- so the banner can stay hidden.
+-- Netrw: quiet listing.
 vim.g.netrw_banner = 0 -- drop the header comment lines
 vim.g.netrw_list_hide = [[^\./$]] -- drop the ./ entry
 
--- ============================================================================
--- Keymaps (plugin-specific ones live with their plugin spec)
--- ============================================================================
+-- Keymaps
 local map = vim.keymap.set
 
 map("n", "<Esc>", "<cmd>nohlsearch<cr>", { desc = "Clear search highlight" })
 map("n", "<leader>w", "<cmd>write<cr>", { desc = "Save file" })
 
--- File navigation: reopen netrw in the current file's directory
+-- File navigation.
 map("n", "-", "<cmd>Explore %:h<cr>", { desc = "Open netrw file browser" })
 
 -- Window navigation
@@ -126,16 +114,14 @@ map("v", "K", ":m '<-2<cr>gv=gv", { desc = "Move selection up" })
 map("v", "<", "<gv")
 map("v", ">", ">gv")
 
--- Terminal mode: Esc Esc to leave, Ctrl-hjkl to jump to other windows.
--- (toggleterm remaps Esc Esc to close its own terminals once it loads.)
+-- Terminal navigation.
 map("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
 map("t", "<C-h>", "<cmd>wincmd h<cr>")
 map("t", "<C-j>", "<cmd>wincmd j<cr>")
 map("t", "<C-k>", "<cmd>wincmd k<cr>")
 map("t", "<C-l>", "<cmd>wincmd l<cr>")
 
--- Build: :make uses the compiler set per filetype (cargo / go / make).
--- Only open the quickfix window when there is something to show.
+-- Build and show errors in quickfix.
 map("n", "<leader>mm", function()
 	vim.cmd("silent make")
 	local has_valid = false
@@ -157,9 +143,7 @@ end, { desc = "Make / build (errors to quickfix)" })
 -- Diagnostics
 map("n", "<leader>xd", vim.diagnostic.open_float, { desc = "Line diagnostics (float)" })
 
--- Hex view of the current buffer via xxd (handy for packet dumps and binaries).
--- The buffer is read-only while in hex mode, so an accidental :w cannot write
--- the textual xxd dump back to disk. Toggle back to decode before saving.
+-- Hex view; read-only while active.
 local function toggle_hex()
 	if vim.fn.executable("xxd") == 0 then
 		vim.notify("xxd is not installed", vim.log.levels.ERROR)
@@ -187,14 +171,12 @@ map("n", "<leader>ui", function()
 	vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
 end, { desc = "Toggle inlay hints" })
 
--- Optional column ruler, off by default
+-- Optional column ruler.
 map("n", "<leader>ur", function()
 	vim.wo.colorcolumn = vim.wo.colorcolumn == "" and "80" or ""
 end, { desc = "Toggle ruler (colorcolumn)" })
 
--- ============================================================================
--- Autocmds & per-language settings
--- ============================================================================
+-- Autocmds and language settings
 local function augroup(name)
 	return vim.api.nvim_create_augroup("user-" .. name, { clear = true })
 end
@@ -246,15 +228,12 @@ end
 ft_opts("go", { expandtab = false, tabstop = 4, shiftwidth = 4 })
 ft_opts({ "asm", "nasm" }, { expandtab = false, tabstop = 8, shiftwidth = 8, softtabstop = 0 })
 ft_opts("make", { expandtab = false })
--- Linux-kernel style? Use: { expandtab = false, tabstop = 8, shiftwidth = 8 }
 ft_opts({ "c", "cpp" }, { tabstop = 4, shiftwidth = 4 })
 
--- `:make` understands cargo / go output and fills the quickfix list
 autocmd("FileType", { group = augroup("compiler-rust"), pattern = "rust", command = "compiler cargo" })
 autocmd("FileType", { group = augroup("compiler-go"), pattern = "go", command = "compiler go" })
 
--- Assembly: comment style depends on the assembler flavour.
--- GAS (.s/.S) uses '#', while NASM/MASM/TASM/FASM use ';'.
+-- GAS uses '#', NASM-family uses ';'.
 autocmd("FileType", {
 	group = augroup("asm-comment"),
 	pattern = { "asm", "nasm", "masm", "tasm", "fasm" },
@@ -271,13 +250,11 @@ autocmd("FileType", {
 	end,
 })
 
--- Map extra filetypes onto tree-sitter grammars
+-- Extra tree-sitter filetypes.
 vim.treesitter.language.register("linkerscript", "ld")
 vim.treesitter.language.register("devicetree", "dts")
 
--- ============================================================================
--- Diagnostics look & feel, inlay hints
--- ============================================================================
+-- Diagnostics and inlay hints
 vim.diagnostic.config({
 	severity_sort = true,
 	update_in_insert = false,
@@ -296,9 +273,7 @@ vim.diagnostic.config({
 
 vim.lsp.inlay_hint.enable(true)
 
--- LSP keymaps. Neovim 0.11 already gives you: grn (rename), gra (code action),
--- grr (references), gri (implementation), grt (type definition), gO (symbols),
--- K (hover), <C-s> in insert mode (signature help), [d / ]d (diagnostics).
+-- LSP keymaps (native gr*/K/[d/]d still work).
 autocmd("LspAttach", {
 	group = augroup("lsp-attach"),
 	callback = function(ev)
@@ -310,7 +285,6 @@ autocmd("LspAttach", {
 		lmap("n", "gd", vim.lsp.buf.definition, "Go to definition")
 		lmap("n", "gD", vim.lsp.buf.declaration, "Go to declaration")
 		lmap("n", "<leader>rn", vim.lsp.buf.rename, "Rename symbol")
-		-- rustaceanvim provides its own (grouped) code actions for Rust buffers
 		if vim.bo[ev.buf].filetype ~= "rust" then
 			lmap({ "n", "x" }, "<leader>ca", vim.lsp.buf.code_action, "Code action")
 		end
@@ -320,9 +294,7 @@ autocmd("LspAttach", {
 	end,
 })
 
--- ============================================================================
 -- Bootstrap lazy.nvim
--- ============================================================================
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
 	local out = vim.fn.system({
@@ -339,10 +311,8 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
--- ============================================================================
 -- Plugins
--- ============================================================================
--- Cycle through every installed colorscheme (remembers where you stopped)
+-- Cycle colorschemes.
 local _theme_i = 0
 map("n", "<leader>uc", function()
 	local schemes = vim.fn.getcompletion("", "color")
@@ -354,7 +324,7 @@ end, { desc = "Cycle colorschemes" })
 
 local plugins = {
 
-	-- Colorscheme -------------------------------------------------------------
+	-- Colorscheme
 	{
 		"catppuccin/nvim",
 		name = "catppuccin",
@@ -383,8 +353,7 @@ local plugins = {
 		end,
 	},
 
-	-- Extra colorschemes: switch with :colorscheme <name>
-	-- (cycle all of them with <leader>uc)
+	-- Extra colorschemes (<leader>uc to cycle).
 	{ "folke/tokyonight.nvim", priority = 1000 }, -- :colorscheme tokyonight-moon
 	{ "rose-pine/neovim", name = "rose-pine", priority = 1000 }, -- :colorscheme rose-pine-moon
 	{ "rebelot/kanagawa.nvim", priority = 1000 }, -- :colorscheme kanagawa
@@ -395,7 +364,7 @@ local plugins = {
 
 	{ "nvim-tree/nvim-web-devicons", lazy = true },
 
-	-- Statusline (shows attached LSP servers) ---------------------------------
+	-- Statusline
 	{
 		"nvim-lualine/lualine.nvim",
 		event = "VeryLazy",
@@ -416,7 +385,7 @@ local plugins = {
 		end,
 	},
 
-	-- Keymap hints ------------------------------------------------------------
+	-- Keymap hints
 	{
 		"folke/which-key.nvim",
 		event = "VeryLazy",
@@ -436,7 +405,7 @@ local plugins = {
 		},
 	},
 
-	-- Fuzzy finder (needs: fzf, ripgrep) --------------------------------------
+	-- Fuzzy finder
 	{
 		"ibhagwan/fzf-lua",
 		event = "VeryLazy",
@@ -542,7 +511,7 @@ local plugins = {
 		end,
 	},
 
-	-- Treesitter (main branch: needs tree-sitter CLI + a C compiler) ----------
+	-- Treesitter
 	{
 		"nvim-treesitter/nvim-treesitter",
 		branch = "main",
@@ -589,7 +558,7 @@ local plugins = {
 				)
 			end
 
-			-- Enable highlighting whenever a parser exists for the filetype
+			-- Start highlighting when a parser exists.
 			autocmd("FileType", {
 				group = augroup("treesitter-start"),
 				callback = function(ev)
@@ -599,7 +568,7 @@ local plugins = {
 		end,
 	},
 
-	-- Sticky function/struct header at the top when scrolling long C functions --
+	-- Sticky context header
 	{
 		"nvim-treesitter/nvim-treesitter-context",
 		event = "VeryLazy",
@@ -615,7 +584,7 @@ local plugins = {
 		},
 	},
 
-	-- LSP: mason installs servers, Neovim 0.11 native vim.lsp.config runs them --
+	-- LSP
 	{
 		"neovim/nvim-lspconfig",
 		dependencies = {
@@ -627,7 +596,6 @@ local plugins = {
 		config = function()
 			require("mason").setup({ ui = { border = "rounded" } })
 
-			-- Completion capabilities for every server
 			vim.lsp.config("*", { capabilities = require("blink.cmp").get_lsp_capabilities() })
 
 			-- C / C++
@@ -662,7 +630,7 @@ local plugins = {
 				},
 			})
 
-			-- Lua (for editing this file)
+			-- Lua
 			vim.lsp.config("lua_ls", {
 				settings = {
 					Lua = {
@@ -674,13 +642,11 @@ local plugins = {
 				},
 			})
 
-			-- Assembly: asm-lsp is installed outside Mason (see the note at the top of
-			-- this file); Mason builds it from source and often fails. Enabled below.
+			-- asm-lsp is installed outside Mason.
 			vim.lsp.config("asm_lsp", { filetypes = { "asm", "vmasm", "nasm" } })
 
 			require("mason-lspconfig").setup({
 				ensure_installed = { "clangd", "gopls", "lua_ls", "bashls" },
-				-- Rust is handled by rustaceanvim; asm_lsp is enabled by hand
 				automatic_enable = { exclude = { "rust_analyzer", "asm_lsp" } },
 			})
 
@@ -688,21 +654,20 @@ local plugins = {
 				vim.lsp.enable("asm_lsp")
 			end
 
-			-- Non-LSP tools: formatters + debug adapters
+			-- Formatters and debug adapters.
 			require("mason-tool-installer").setup({
 				ensure_installed = { "stylua", "clang-format", "goimports", "gofumpt", "delve", "codelldb" },
 			})
 		end,
 	},
 
-	-- Lua LSP knows about the `vim` API (nice when tweaking this config)
 	{
 		"folke/lazydev.nvim",
 		ft = "lua",
 		opts = { library = { { path = "${3rd}/luv/library", words = { "vim%.uv" } } } },
 	},
 
-	-- Rust: rust-analyzer + clippy + runnables + debugging ---------------------
+	-- Rust
 	{
 		"mrcjkb/rustaceanvim",
 		version = "^6",
@@ -757,32 +722,24 @@ local plugins = {
 		end,
 	},
 
-	-- Completion --------------------------------------------------------------
+	-- Completion
 	{
 		"saghen/blink.cmp",
 		version = "1.*", -- prebuilt fuzzy-matching binaries
 		dependencies = { "rafamadriz/friendly-snippets" },
 		opts = {
-			-- Fully explicit keymap (no preset) so nothing can be inherited or overridden.
-			-- Each list is tried left to right; "fallback" runs the key's normal behaviour.
 			keymap = {
 				preset = "none",
-				-- Enter accepts the highlighted item; if the menu is closed it steps to the
-				-- next snippet placeholder, and only then falls back to a plain newline.
 				["<CR>"] = { "accept", "snippet_forward", "fallback" },
-				-- Tab / Ctrl-y: accept the highlighted item
 				["<C-y>"] = { "accept", "fallback" },
 				["<Tab>"] = { "accept", "snippet_forward", "fallback" },
 				["<S-Tab>"] = { "snippet_backward", "fallback" },
-				-- Move through the list
 				["<Down>"] = { "select_next", "fallback" },
 				["<Up>"] = { "select_prev", "fallback" },
 				["<C-n>"] = { "select_next", "fallback" },
 				["<C-p>"] = { "select_prev", "fallback" },
-				-- Open / close menu and docs
 				["<C-space>"] = { "show", "show_documentation", "hide_documentation" },
 				["<C-e>"] = { "hide", "fallback" },
-				-- Scroll the documentation window
 				["<C-b>"] = { "scroll_documentation_up", "fallback" },
 				["<C-f>"] = { "scroll_documentation_down", "fallback" },
 			},
@@ -817,8 +774,6 @@ local plugins = {
 				},
 			},
 			completion = {
-				-- First item is highlighted automatically, so Enter/Tab accept it right away.
-				-- auto_insert = false: moving through the list doesn't type text into the buffer.
 				list = { selection = { preselect = true, auto_insert = false } },
 				documentation = { auto_show = true, auto_show_delay_ms = 300 },
 			},
@@ -827,7 +782,7 @@ local plugins = {
 		},
 	},
 
-	-- Formatting --------------------------------------------------------------
+	-- Formatting
 	{
 		"stevearc/conform.nvim",
 		event = "BufWritePre",
@@ -855,11 +810,10 @@ local plugins = {
 				cpp = { "clang-format" },
 				go = { "goimports", "gofumpt" },
 				asm = { "trim_whitespace" },
-				-- rust: no entry -> falls back to rust-analyzer (rustfmt)
+				-- Rust: rustfmt via rust-analyzer.
 			},
 			formatters = {
-				-- Only format C when the project has a .clang-format; never impose a
-				-- style on someone else's code.
+				-- Respect project .clang-format when present.
 				["clang-format"] = { prepend_args = { "--fallback-style=none" } },
 			},
 			default_format_opts = { lsp_format = "fallback" },
@@ -867,7 +821,7 @@ local plugins = {
 				if not vim.g.autoformat then
 					return nil
 				end
-				-- Skip very large buffers: formatting them can block the UI.
+				-- Skip buffers larger than 1 MiB.
 				local size = vim.api.nvim_buf_get_offset(bufnr, vim.api.nvim_buf_line_count(bufnr))
 				if size > 1024 * 1024 then
 					return nil
@@ -877,7 +831,7 @@ local plugins = {
 		},
 	},
 
-	-- Debugging: codelldb (C/C++/asm/Rust) + delve (Go) ------------------------
+	-- Debugging
 	{
 		"mfussenegger/nvim-dap",
 		dependencies = {
@@ -988,7 +942,6 @@ local plugins = {
 				dapui.close()
 			end
 
-			-- codelldb comes from mason (its bin dir is on PATH)
 			dap.adapters.codelldb = {
 				type = "server",
 				port = "${port}",
@@ -1022,7 +975,7 @@ local plugins = {
 				},
 			}
 			dap.configurations.cpp = dap.configurations.c
-			-- Assembly: stop at the very first instruction (_start)
+			-- Assembly: stop at entry.
 			dap.configurations.asm = {
 				{
 					name = "Launch (stop at entry)",
@@ -1035,13 +988,11 @@ local plugins = {
 			}
 			dap.configurations.nasm = dap.configurations.asm
 			dap.configurations.vmasm = dap.configurations.asm
-			-- Rust debugging goes through rustaceanvim (<leader>rd); Go through nvim-dap-go.
 		end,
 	},
 
-	-- Terminal (toggleterm.nvim) ----------------------------------------------
-	-- Floats by default; <count> picks the terminal (e.g. 2<C-\>).
-	-- <Esc><Esc> closes it from terminal mode; <C-\><C-n> just exits to normal.
+	-- Terminal
+	-- Floats by default; <Esc><Esc> closes.
 	{
 		"akinsho/toggleterm.nvim",
 		version = "*",
@@ -1049,8 +1000,6 @@ local plugins = {
 			direction = "float",
 			close_on_exit = true,
 			float_opts = { border = "rounded", width = 120, height = 30 },
-			-- Prevent toggleterm from hijacking <Esc><Esc> globally; we map per terminal
-			-- or just keep normal terminal mode behavior
 			open_mapping = nil,
 		},
 		keys = {
@@ -1098,7 +1047,7 @@ local plugins = {
 		},
 	},
 
-	-- Git ---------------------------------------------------------------------
+	-- Git
 	{
 		"lewis6991/gitsigns.nvim",
 		event = { "BufReadPre", "BufNewFile" },
@@ -1125,7 +1074,7 @@ local plugins = {
 		},
 	},
 
-	-- Diagnostics / quickfix list UI ------------------------------------------
+	-- Diagnostics and quickfix
 	{
 		"folke/trouble.nvim",
 		cmd = "Trouble",
@@ -1138,7 +1087,7 @@ local plugins = {
 		},
 	},
 
-	-- Highlight TODO / FIXME / HACK / NOTE ------------------------------------
+	-- TODO comments
 	{
 		"folke/todo-comments.nvim",
 		event = { "BufReadPost", "BufNewFile" },
@@ -1146,7 +1095,7 @@ local plugins = {
 		opts = {},
 	},
 
-	-- Small quality-of-life pack: auto-pairs, surround (sa/sd/sr), better a/i objects
+	-- Mini.nvim
 	{
 		"echasnovski/mini.nvim",
 		version = false,
@@ -1158,8 +1107,7 @@ local plugins = {
 		end,
 	},
 
-	-- Indent guides (useful with deeply nested C). Faint vertical lines on
-	-- indented code are these; set enabled = false below to get rid of them.
+	-- Indent guides.
 	{
 		"lukas-reineke/indent-blankline.nvim",
 		main = "ibl",

@@ -1,6 +1,4 @@
--- Language settings for HLA (High Level Assembly).
--- The ~/.local/bin/hla launcher sets the lowercase include/lib variables and
--- writes <name>.o next to the source file; `:make` therefore uses %:p.
+-- HLA settings.
 
 if vim.b.did_ftplugin then
 	return
@@ -15,9 +13,7 @@ vim.bo.softtabstop = 4
 vim.bo.smartindent = true
 
 vim.bo.makeprg = "hla %:p"
--- HLA prints the location header first, then the actual error on the following
--- lines. Ignore the [errid:...] suffix on the header, collect the detail lines,
--- and drop the trailing blank line and "HLAPARSE assembly failed" summary.
+-- Ignore the header, summary, and blank lines.
 vim.bo.errorformat = table.concat({
 	'%EError in file "%f" at line %l%.%#',
 	"%C%m",
