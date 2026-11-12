@@ -27,14 +27,14 @@ vim.g.loaded_ruby_provider = 0
 -- ~/.local/bin holds the HLA launcher (hla), arduino-cli, and similar tools;
 -- ~/.cargo/bin holds asm-lsp and other cargo installs.
 do
-	local path = vim.env.PATH or ""
-	for _, dir in ipairs({ "~/.local/bin", "~/.cargo/bin" }) do
+	local dirs = vim.split(vim.env.PATH or "", ":", { plain = true })
+	for _, dir in ipairs({ "~/.cargo/bin", "~/.local/bin" }) do
 		local bin = vim.fn.expand(dir)
-		if not path:find(bin, 1, true) then
-			path = bin .. ":" .. path
+		if not vim.tbl_contains(dirs, bin) then
+			table.insert(dirs, 1, bin)
 		end
 	end
-	vim.env.PATH = path
+	vim.env.PATH = table.concat(dirs, ":")
 end
 
 -- ============================================================================
@@ -53,19 +53,22 @@ o.clipboard = "unnamedplus"
 -- Use xsel (X11/XWayland) as the clipboard provider instead of wl-clipboard.
 -- On Wayland/GNOME, wl-copy creates a transient surface which makes the
 -- terminal/GNOME flicker (neovim#12622, neovim#36975); xsel via XWayland
--- avoids that entirely.
-vim.g.clipboard = {
-  name = "xsel",
-  copy = {
-    ["+"] = { "xsel", "--input", "--clipboard" },
-    ["*"] = { "xsel", "--input", "--primary" },
-  },
-  paste = {
-    ["+"] = { "xsel", "--output", "--clipboard" },
-    ["*"] = { "xsel", "--output", "--primary" },
-  },
-  cache_enabled = 0,
-}
+-- avoids that entirely. Fall back to Neovim's default provider if xsel is
+-- missing so yanking never breaks.
+if vim.fn.executable("xsel") == 1 then
+	vim.g.clipboard = {
+		name = "xsel",
+		copy = {
+			["+"] = { "xsel", "--input", "--clipboard" },
+			["*"] = { "xsel", "--input", "--primary" },
+		},
+		paste = {
+			["+"] = { "xsel", "--output", "--clipboard" },
+			["*"] = { "xsel", "--output", "--primary" },
+		},
+		cache_enabled = 0,
+	}
+end
 o.breakindent = true
 o.undofile = true
 o.swapfile = false
@@ -137,22 +140,50 @@ map("t", "<C-j>", "<cmd>wincmd j<cr>")
 map("t", "<C-k>", "<cmd>wincmd k<cr>")
 map("t", "<C-l>", "<cmd>wincmd l<cr>")
 
--- Build: :make uses the compiler set per filetype (cargo / go / make)
-map("n", "<leader>mm", "<cmd>silent make | copen<cr>", { desc = "Make / build (errors to quickfix)" })
+-- Build: :make uses the compiler set per filetype (cargo / go / make).
+-- Only open the quickfix window when there is something to show.
+map("n", "<leader>mm", function()
+	vim.cmd("silent make")
+	local has_valid = false
+	for _, item in ipairs(vim.fn.getqflist()) do
+		if item.valid == 1 then
+			has_valid = true
+			break
+		end
+	end
+	if has_valid then
+		vim.cmd("copen")
+	elseif vim.v.shell_error ~= 0 then
+		vim.notify("Build failed (see :messages)", vim.log.levels.ERROR)
+	else
+		vim.notify("Build succeeded", vim.log.levels.INFO)
+	end
+end, { desc = "Make / build (errors to quickfix)" })
 
 -- Diagnostics
 map("n", "<leader>xd", vim.diagnostic.open_float, { desc = "Line diagnostics (float)" })
 
 -- Hex view of the current buffer via xxd (handy for packet dumps and binaries).
--- Don't :w while in hex mode unless you toggle back first!
+-- The buffer is read-only while in hex mode, so an accidental :w cannot write
+-- the textual xxd dump back to disk. Toggle back to decode before saving.
 local function toggle_hex()
+	if vim.fn.executable("xxd") == 0 then
+		vim.notify("xxd is not installed", vim.log.levels.ERROR)
+		return
+	end
 	if vim.b.hex_mode then
 		vim.cmd("%!xxd -r")
-		vim.bo.binary = false
+		vim.bo.binary = vim.b.hex_orig_binary or false
+		vim.bo.readonly = vim.b.hex_orig_readonly or false
 		vim.b.hex_mode = false
+		vim.b.hex_orig_binary = nil
+		vim.b.hex_orig_readonly = nil
 	else
+		vim.b.hex_orig_binary = vim.bo.binary
+		vim.b.hex_orig_readonly = vim.bo.readonly
 		vim.bo.binary = true
 		vim.cmd("%!xxd")
+		vim.bo.readonly = true
 		vim.b.hex_mode = true
 	end
 end
@@ -164,7 +195,7 @@ end, { desc = "Toggle inlay hints" })
 
 -- Optional column ruler, off by default
 map("n", "<leader>ur", function()
-	vim.opt_local.colorcolumn = vim.o.colorcolumn == "" and "80" or ""
+	vim.wo.colorcolumn = vim.wo.colorcolumn == "" and "80" or ""
 end, { desc = "Toggle ruler (colorcolumn)" })
 
 -- ============================================================================
@@ -186,6 +217,9 @@ autocmd("TextYankPost", {
 autocmd("BufReadPost", {
 	group = augroup("restore-cursor"),
 	callback = function(ev)
+		if vim.bo[ev.buf].buftype ~= "" then
+			return
+		end
 		local mark = vim.api.nvim_buf_get_mark(ev.buf, '"')
 		if mark[1] > 0 and mark[1] <= vim.api.nvim_buf_line_count(ev.buf) then
 			pcall(vim.api.nvim_win_set_cursor, 0, mark)
@@ -216,7 +250,7 @@ local function ft_opts(pattern, opts)
 end
 
 ft_opts("go", { expandtab = false, tabstop = 4, shiftwidth = 4 })
-ft_opts({ "asm", "nasm" }, { expandtab = false, tabstop = 8, shiftwidth = 8 })
+ft_opts({ "asm", "nasm" }, { expandtab = false, tabstop = 8, shiftwidth = 8, softtabstop = 0 })
 ft_opts("make", { expandtab = false })
 -- Linux-kernel style? Use: { expandtab = false, tabstop = 8, shiftwidth = 8 }
 ft_opts({ "c", "cpp" }, { tabstop = 4, shiftwidth = 4 })
@@ -231,7 +265,13 @@ autocmd("FileType", {
 	group = augroup("asm-comment"),
 	pattern = { "asm", "nasm", "masm", "tasm", "fasm" },
 	callback = function()
-		local syn = vim.b.asmsyntax or vim.g.asmsyntax or vim.bo.filetype
+		local syn = vim.b.asmsyntax
+		if syn == nil or syn == "" then
+			syn = vim.g.asmsyntax
+		end
+		if syn == nil or syn == "" then
+			syn = vim.bo.filetype
+		end
 		local semicolon = { nasm = true, masm = true, tasm = true, fasm = true }
 		vim.bo.commentstring = semicolon[syn] and "; %s" or "# %s" -- '// %s' for ARM GAS
 	end,
@@ -352,7 +392,7 @@ local plugins = {
 	-- Extra colorschemes: switch with :colorscheme <name>
 	-- (cycle all of them with <leader>uc)
 	{ "folke/tokyonight.nvim", priority = 1000 }, -- :colorscheme tokyonight-moon
-	{ "rose-pine/neovim", priority = 1000 }, -- :colorscheme rose-pine-moon
+	{ "rose-pine/neovim", name = "rose-pine", priority = 1000 }, -- :colorscheme rose-pine-moon
 	{ "rebelot/kanagawa.nvim", priority = 1000 }, -- :colorscheme kanagawa
 	{ "sainnhe/everforest", priority = 1000 }, -- :colorscheme everforest
 	{ "EdenEast/nightfox.nvim", priority = 1000 }, -- :colorscheme nightfox
@@ -508,8 +548,6 @@ local plugins = {
 		end,
 	},
 
-
-
 	-- Treesitter (main branch: needs tree-sitter CLI + a C compiler) ----------
 	{
 		"nvim-treesitter/nvim-treesitter",
@@ -632,7 +670,14 @@ local plugins = {
 
 			-- Lua (for editing this file)
 			vim.lsp.config("lua_ls", {
-				settings = { Lua = { completion = { callSnippet = "Replace" }, telemetry = { enable = false } } },
+				settings = {
+					Lua = {
+						runtime = { version = "LuaJIT" },
+						workspace = { checkThirdParty = false },
+						completion = { callSnippet = "Replace" },
+						telemetry = { enable = false },
+					},
+				},
 			})
 
 			-- Assembly: asm-lsp is installed outside Mason (see the note at the top of
@@ -824,8 +869,13 @@ local plugins = {
 				["clang-format"] = { prepend_args = { "--fallback-style=none" } },
 			},
 			default_format_opts = { lsp_format = "fallback" },
-			format_on_save = function()
+			format_on_save = function(bufnr)
 				if not vim.g.autoformat then
+					return nil
+				end
+				-- Skip very large buffers: formatting them can block the UI.
+				local size = vim.api.nvim_buf_get_offset(bufnr, vim.api.nvim_buf_line_count(bufnr))
+				if size > 1024 * 1024 then
 					return nil
 				end
 				return { timeout_ms = 1000, lsp_format = "fallback" }
@@ -952,7 +1002,12 @@ local plugins = {
 			}
 
 			local function ask_exe()
-				return vim.fn.input("Executable: ", vim.fn.getcwd() .. "/", "file")
+				local default = vim.fn.expand("%:p:r")
+				if default == "" then
+					default = vim.fn.getcwd() .. "/"
+				end
+				local input = vim.fn.input("Executable: ", default, "file")
+				return input ~= "" and input or default
 			end
 
 			dap.configurations.c = {
@@ -984,6 +1039,8 @@ local plugins = {
 					stopOnEntry = true,
 				},
 			}
+			dap.configurations.nasm = dap.configurations.asm
+			dap.configurations.vmasm = dap.configurations.asm
 			-- Rust debugging goes through rustaceanvim (<leader>rd); Go through nvim-dap-go.
 		end,
 	},
