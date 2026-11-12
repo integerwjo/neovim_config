@@ -3,7 +3,9 @@
 -- Requires Neovim >= 0.11 (Ubuntu's apt version is too old, see setup notes).
 --
 -- Extra setup for assembly LSP (not installed through Mason):
---   cargo install asm-lsp
+--   Prebuilt: https://github.com/bergercookie/asm-lsp/releases
+--             (drop the binary in ~/.cargo/bin)
+--   Or build: cargo install asm-lsp   (needs openssl-devel on Fedora)
 
 vim.o.guifont = "JetBrainsMono Nerd Font Mono:h10"
 
@@ -21,12 +23,18 @@ vim.g.loaded_python3_provider = 0
 vim.g.loaded_perl_provider = 0
 vim.g.loaded_ruby_provider = 0
 
--- Make cargo-installed binaries (asm-lsp, etc.) visible to Neovim and Mason
+-- Make user-local binaries visible to Neovim, :make and Mason.
+-- ~/.local/bin holds the HLA launcher (hla), arduino-cli, and similar tools;
+-- ~/.cargo/bin holds asm-lsp and other cargo installs.
 do
-	local cargo_bin = vim.fn.expand("~/.cargo/bin")
-	if not vim.env.PATH:find(cargo_bin, 1, true) then
-		vim.env.PATH = cargo_bin .. ":" .. vim.env.PATH
+	local path = vim.env.PATH or ""
+	for _, dir in ipairs({ "~/.local/bin", "~/.cargo/bin" }) do
+		local bin = vim.fn.expand(dir)
+		if not path:find(bin, 1, true) then
+			path = bin .. ":" .. path
+		end
 	end
+	vim.env.PATH = path
 end
 
 -- ============================================================================
@@ -217,14 +225,15 @@ ft_opts({ "c", "cpp" }, { tabstop = 4, shiftwidth = 4 })
 autocmd("FileType", { group = augroup("compiler-rust"), pattern = "rust", command = "compiler cargo" })
 autocmd("FileType", { group = augroup("compiler-go"), pattern = "go", command = "compiler go" })
 
--- Assembly: comment style depends on the assembler flavour
+-- Assembly: comment style depends on the assembler flavour.
+-- GAS (.s/.S) uses '#', while NASM/MASM/TASM/FASM use ';'.
 autocmd("FileType", {
 	group = augroup("asm-comment"),
-	pattern = "asm",
+	pattern = { "asm", "nasm", "masm", "tasm", "fasm" },
 	callback = function()
-		local syn = vim.b.asmsyntax or vim.g.asmsyntax or ""
+		local syn = vim.b.asmsyntax or vim.g.asmsyntax or vim.bo.filetype
 		local semicolon = { nasm = true, masm = true, tasm = true, fasm = true }
-		vim.bo.commentstring = semicolon[syn] and "; %s" or "# %s" -- change to '// %s' for ARM GAS
+		vim.bo.commentstring = semicolon[syn] and "; %s" or "# %s" -- '// %s' for ARM GAS
 	end,
 })
 
@@ -626,8 +635,8 @@ local plugins = {
 				settings = { Lua = { completion = { callSnippet = "Replace" }, telemetry = { enable = false } } },
 			})
 
-			-- Assembly: asm-lsp is installed with `cargo install asm-lsp`, not Mason
-			-- (Mason builds it from source and often fails). It is enabled manually below.
+			-- Assembly: asm-lsp is installed outside Mason (see the note at the top of
+			-- this file); Mason builds it from source and often fails. Enabled below.
 			vim.lsp.config("asm_lsp", { filetypes = { "asm", "vmasm", "nasm" } })
 
 			require("mason-lspconfig").setup({
